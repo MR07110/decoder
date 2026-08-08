@@ -517,7 +517,7 @@
   // ---------- Tabs (localStorage) ----------
   const tabbar = document.getElementById('tabbar');
   const addTabBtn = document.getElementById('addTabBtn');
-  const MAX_TABS = 20;
+  const MAX_TABS = 2;
   let tabs = [];
   let activeTabId = null;
   let justAddedTabId = null;
@@ -707,17 +707,79 @@
       reader.readAsText(file);
       return;
     }
-    if (!file.type.startsWith('image/')){
+    if (!file.type.startsWith('image/') && !/\.(jpe?g|png|webp|gif|bmp|avif)$/i.test(file.name)){
       alert('Iltimos, rasm yoki JSON fayl tanlang.');
       return;
     }
     const reader = new FileReader();
-    reader.onload = e => {
-      const img = new Image();
-      img.onload = () => handleImage(img);
-      img.src = e.target.result;
+    reader.onload = e => loadImageRobust(e.target.result, file.type);
+    reader.onerror = () => alert('Faylni o\'qib bo\'lmadi.');
+    reader.readAsArrayBuffer(file);
+  }
+
+  // ---------- Robust image decode (auto-fixes broken/ICC WEBP etc.) ----------
+  function stripWebpIcc(buffer){
+    try{
+      const view = new DataView(buffer);
+      if (view.getUint32(0,false) !== 0x52494646) return null; // 'RIFF'
+      if (view.getUint32(8,false) !== 0x57454250) return null; // 'WEBP'
+      let offset = 12, vp8xOffset = -1, iccpOffset = -1, iccpChunkLen = -1;
+      while (offset + 8 <= buffer.byteLength){
+        const fourcc = String.fromCharCode(view.getUint8(offset),view.getUint8(offset+1),view.getUint8(offset+2),view.getUint8(offset+3));
+        const size = view.getUint32(offset+4,true);
+        const paddedSize = size + (size % 2);
+        if (fourcc === 'VP8X') vp8xOffset = offset + 8;
+        if (fourcc === 'ICCP'){ iccpOffset = offset; iccpChunkLen = 8 + paddedSize; }
+        offset += 8 + paddedSize;
+      }
+      if (vp8xOffset === -1 || iccpOffset === -1) return null;
+      const newLen = buffer.byteLength - iccpChunkLen;
+      const newBuf = new ArrayBuffer(newLen);
+      const src = new Uint8Array(buffer), dst = new Uint8Array(newBuf);
+      dst.set(src.subarray(0, iccpOffset), 0);
+      dst.set(src.subarray(iccpOffset + iccpChunkLen), iccpOffset);
+      const nv = new DataView(newBuf);
+      nv.setUint8(vp8xOffset, nv.getUint8(vp8xOffset) & ~0x20); // clear ICC flag bit
+      nv.setUint32(4, newLen - 8, true); // fix RIFF size
+      return newBuf;
+    }catch(e){ return null; }
+  }
+
+  function bufferToBase64(buffer){
+    let binary = '';
+    const bytes = new Uint8Array(buffer);
+    const chunkSize = 0x8000;
+    for (let i = 0; i < bytes.length; i += chunkSize){
+      binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunkSize));
+    }
+    return btoa(binary);
+  }
+
+  function loadImageRobust(buffer, mimeType, attempted){
+    attempted = attempted || {};
+    const type = (mimeType && mimeType.startsWith('image/')) ? mimeType : 'image/webp';
+    const dataUrl = 'data:' + type + ';base64,' + bufferToBase64(buffer);
+    const img = new Image();
+    img.onload = () => handleImage(img);
+    img.onerror = () => {
+      if (!attempted.icc){
+        const stripped = stripWebpIcc(buffer);
+        if (stripped){ attempted.icc = true; loadImageRobust(stripped, 'image/webp', attempted); return; }
+      }
+      if (!attempted.bitmap && window.createImageBitmap){
+        attempted.bitmap = true;
+        createImageBitmap(new Blob([buffer]))
+          .then(bmp => handleImage(bmp))
+          .catch(() => showDecodeError());
+        return;
+      }
+      showDecodeError();
     };
-    reader.readAsDataURL(file);
+    img.src = dataUrl;
+  }
+
+  function showDecodeError(){
+    alert('Rasmni ochib bo\'lmadi. Fayl shikastlangan bo\'lishi mumkin. Rasmni PNG yoki JPG formatiga o\'tkazib qayta urinib ko\'ring.');
   }
 
   function resetButtons(){
