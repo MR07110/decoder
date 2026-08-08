@@ -1,0 +1,993 @@
+<!DOCTYPE html>
+<html lang="uz">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Piksel Dekoder</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230ea5e9'/%3E%3Crect x='6' y='6' width='9' height='9' rx='2' fill='%23ffffff'/%3E%3Crect x='17' y='6' width='9' height='9' rx='2' fill='%23bae6fd'/%3E%3Crect x='6' y='17' width='9' height='9' rx='2' fill='%23bae6fd'/%3E%3Crect x='17' y='17' width='9' height='9' rx='2' fill='%23ffffff'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#eef7fc;
+    --surface:#ffffff;
+    --border:#d3e9f7;
+    --accent:#0ea5e9;
+    --accent-dark:#0284c7;
+    --accent-soft:#e0f4fd;
+    --text:#0f2a3d;
+    --text-dim:#6b8ba1;
+    --danger:#e0563f;
+    --ok:#16a34a;
+    --radius:14px;
+    --code-bg:#f7fbfe;
+    --code-hdr-bg:#eef7fc;
+    --code-hdr-border:#d3e9f7;
+    --code-text:#0f2a3d;
+    --code-filename:#3f6d87;
+    --code-icon:#0ea5e9;
+    --code-copy-bg:#e0f4fd;
+    --code-copy-border:#bae6fd;
+    --code-copy-text:#0284c7;
+    --code-copy-hover-bg:#bae6fd;
+    --jt-key:#0284c7;
+    --jt-str:#15803d;
+    --jt-num:#dc2626;
+    --jt-bool:#c2410c;
+    --jt-null:#7c3aed;
+    --jt-punc:#8ca3b3;
+  }
+  html[data-theme="dark"]{
+    --bg:#0a1826;
+    --surface:#101f30;
+    --border:#1e3348;
+    --accent:#0ea5e9;
+    --accent-dark:#38bdf8;
+    --accent-soft:#132a3d;
+    --text:#e7f3fb;
+    --text-dim:#7b97ab;
+    --danger:#f0715a;
+    --ok:#22c55e;
+    --code-bg:#0f2a3d;
+    --code-hdr-bg:#0c2233;
+    --code-hdr-border:rgba(186,230,253,0.12);
+    --code-text:#d7f0ff;
+    --code-filename:#bcdcf0;
+    --code-icon:#7dd3fc;
+    --code-copy-bg:rgba(186,230,253,0.1);
+    --code-copy-border:rgba(186,230,253,0.18);
+    --code-copy-text:#bcdcf0;
+    --code-copy-hover-bg:rgba(186,230,253,0.22);
+    --jt-key:#7dd3fc;
+    --jt-str:#86efac;
+    --jt-num:#fca5a5;
+    --jt-bool:#fdba74;
+    --jt-null:#c4b5fd;
+    --jt-punc:#7690a3;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;background:var(--bg);color:var(--text);font-family:'Inter',system-ui,sans-serif;}
+  html{transition:background .2s;}
+  body,.card,.tab,.tab-add,.dropzone,.btn,.dropdown-menu,.change-file,.canvas-frame{transition:background .2s,color .2s,border-color .2s;}
+  .wrap{max-width:720px;margin:0 auto;padding:40px 20px 60px;}
+
+  @keyframes fadeInUp{
+    from{opacity:0; transform:translateY(8px);}
+    to{opacity:1; transform:translateY(0);}
+  }
+  @keyframes fadeIn{
+    from{opacity:0;}
+    to{opacity:1;}
+  }
+  @keyframes popIn{
+    from{opacity:0; transform:scale(.92);}
+    to{opacity:1; transform:scale(1);}
+  }
+
+  header{margin-bottom:24px;}
+  .header-top{display:flex;align-items:center;gap:12px;margin-bottom:16px;}
+  header .logo{width:38px;height:38px;flex-shrink:0;}
+  .header-top .header-titles{flex:1;min-width:0;}
+  .theme-toggle{
+    position:relative;
+    flex-shrink:0;width:38px;height:38px;
+    display:flex;align-items:center;justify-content:center;
+    border:1px solid var(--border);border-radius:50%;
+    background:var(--surface);color:var(--accent);cursor:pointer;
+    transition:background .15s,color .15s,border-color .2s;
+  }
+  .theme-toggle:hover{background:var(--accent-soft);}
+  .theme-toggle svg{
+    width:18px;height:18px;position:absolute;
+    transition:opacity .25s ease,transform .35s ease;
+  }
+  .theme-toggle .icon-moon{opacity:0;transform:rotate(-70deg) scale(.5);}
+  .theme-toggle .icon-sun{opacity:1;transform:rotate(0) scale(1);}
+  html[data-theme="dark"] .theme-toggle .icon-sun{opacity:0;transform:rotate(70deg) scale(.5);}
+  html[data-theme="dark"] .theme-toggle .icon-moon{opacity:1;transform:rotate(0) scale(1);}
+  header h1{font-size:20px;font-weight:700;margin:0;letter-spacing:-0.01em;}
+  header p{font-size:13px;color:var(--text-dim);margin:2px 0 0;}
+
+  .tabbar-row{display:flex;align-items:flex-end;gap:8px;}
+  .tabbar{
+    display:flex;gap:6px;overflow-x:auto;flex:1;
+    padding-bottom:2px;scroll-behavior:smooth;
+  }
+  .tabbar::-webkit-scrollbar{height:5px;}
+  .tabbar::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px;}
+  .tab{
+    display:flex;align-items:center;gap:7px;flex:0 0 auto;
+    background:var(--surface);border:1px solid var(--border);
+    border-bottom:2px solid transparent;
+    border-radius:9px 9px 0 0;
+    padding:9px 10px;font-size:12.5px;font-weight:500;
+    color:var(--text-dim);cursor:pointer;white-space:nowrap;
+    transition:background .15s,color .15s,border-color .2s;
+  }
+  .tab.tab-enter{animation:popIn .2s ease both;}
+  .tab:hover{background:var(--accent-soft);}
+  .tab.active{background:var(--accent-soft);color:var(--accent-dark);border-color:var(--accent);font-weight:600;}
+  .tab .tab-close{
+    display:flex;align-items:center;justify-content:center;
+    width:16px;height:16px;border-radius:50%;flex-shrink:0;color:inherit;
+    transition:background .15s,color .15s;
+  }
+  .tab .tab-close:hover{background:var(--danger);color:#fff;}
+  .tab .tab-close svg{width:9px;height:9px;}
+
+  .tab-add{
+    flex:0 0 auto;width:32px;height:32px;
+    display:flex;align-items:center;justify-content:center;
+    border:1px solid var(--border);border-radius:9px;
+    background:var(--surface);color:var(--accent);cursor:pointer;
+    margin-bottom:2px;
+  }
+  .tab-add svg{width:16px;height:16px;}
+  .tab-add:hover:not(:disabled){background:var(--accent-soft);}
+  .tab-add:disabled{opacity:.4;cursor:not-allowed;}
+
+  .card{
+    background:var(--surface);
+    border:1px solid var(--border);
+    border-radius:var(--radius);
+    padding:22px;
+    margin-bottom:18px;
+    box-shadow:0 1px 3px rgba(14,165,233,0.06);
+  }
+
+  .dropzone-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
+  @media (max-width:480px){ .dropzone-grid{grid-template-columns:1fr;} }
+
+  .dropzone{
+    border:1.5px dashed var(--border);
+    border-radius:var(--radius);
+    padding:26px 14px;
+    text-align:center;
+    cursor:pointer;
+    transition:border-color .15s, background .15s;
+  }
+  .dropzone:hover, .dropzone.drag{ border-color:var(--accent); background:var(--accent-soft); }
+  .dropzone input{display:none;}
+  .dropzone svg{width:30px;height:30px;color:var(--accent);margin-bottom:8px;}
+  .dropzone .main-txt{font-size:14px;font-weight:500;}
+  .dropzone .sub-txt{font-size:12px;color:var(--text-dim);margin-top:3px;}
+
+  .change-file{
+    display:flex;align-items:center;gap:6px;
+    font-family:inherit;font-size:12.5px;font-weight:500;
+    color:var(--text-dim);background:none;border:none;
+    padding:0 0 4px;margin-bottom:4px;cursor:pointer;
+  }
+  .change-file svg{width:14px;height:14px;}
+  .change-file:hover{color:var(--accent-dark);}
+
+  .preview-area{display:none;gap:18px;margin-top:4px;}
+  .preview-area.show{display:grid;grid-template-columns:150px 1fr;animation:fadeInUp .3s ease both;}
+  @media (max-width:520px){ .preview-area.show{grid-template-columns:1fr;} }
+
+  .canvas-frame{
+    border:1px solid var(--border);
+    border-radius:10px;
+    background:repeating-conic-gradient(#f1f5f9 0% 25%, #ffffff 0% 50%) 0 0/16px 16px;
+    overflow:hidden;
+    aspect-ratio:1;
+    display:flex;align-items:center;justify-content:center;
+  }
+  canvas{max-width:100%;max-height:100%;image-rendering:pixelated;display:block;}
+
+  .meta-list{display:flex;flex-direction:column;justify-content:center;gap:9px;}
+  .meta-row{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--text-dim);}
+  .meta-row svg{width:15px;height:15px;color:var(--accent);flex-shrink:0;}
+  .meta-row b{color:var(--text);font-weight:600;margin-left:auto;}
+  .meta-row.warn b{color:var(--danger);}
+
+  .progress-wrap{display:none;margin-top:16px;}
+  .progress-wrap.show{display:block;animation:fadeInUp .25s ease both;}
+  .progress-labels{display:flex;justify-content:space-between;font-size:12px;color:var(--text-dim);margin-bottom:6px;}
+  .progress-track{height:6px;background:var(--accent-soft);border-radius:4px;overflow:hidden;}
+  .progress-fill{height:100%;width:0%;background:var(--accent);transition:width .1s linear;}
+
+  .btn-row{display:flex;gap:10px;margin-top:18px;flex-wrap:wrap;}
+  #btnRowImage,#btnRowJson{animation:fadeInUp .3s ease both;}
+  #changeFileBtn{animation:fadeIn .2s ease both;}
+  #dropzoneGrid{animation:fadeIn .2s ease both;}
+  .btn-half{flex:1 1 0;justify-content:center;}
+  .btn{
+    -webkit-appearance:none;appearance:none;
+    display:inline-flex;align-items:center;gap:7px;
+    font-family:inherit;font-size:13px;font-weight:600;
+    background:var(--accent-soft);color:var(--accent-dark);
+    border:1px solid var(--border);border-radius:9px;
+    padding:10px 16px;margin:0;cursor:pointer;transition:background .15s, color .15s;
+  }
+  .btn svg{width:15px;height:15px;}
+  .btn:hover:not(:disabled){background:var(--accent);color:#fff;}
+  .btn.primary{background:var(--accent);color:#fff;}
+  .btn.primary:hover:not(:disabled){background:var(--accent-dark);}
+  .btn:disabled{opacity:.4;cursor:not-allowed;}
+
+  .split-btn{position:relative;display:inline-flex;}
+  .split-btn-full{display:flex;width:100%;}
+  .split-btn-full .btn.primary:not(.toggle-part){flex:1 1 auto;justify-content:center;}
+  .split-btn .btn.primary:not(.toggle-part){border-radius:9px 0 0 9px;border-right:none;}
+  .split-btn .toggle-part{
+    border-radius:0 9px 9px 0;
+    border-left:1px solid rgba(255,255,255,0.35);
+    padding:10px 14px;
+  }
+  .split-btn .toggle-part svg{transition:transform .15s;}
+  .split-btn.open .toggle-part svg{transform:rotate(180deg);}
+
+  .json-preview-wrap{display:none;margin-top:16px;}
+  .json-preview-wrap.show{display:block;animation:fadeInUp .3s ease both;}
+  .code-editor{
+    border:1px solid var(--border);border-radius:10px;
+    overflow:hidden;background:var(--code-bg);
+    transition:background .2s,border-color .2s;
+  }
+  .code-editor-hdr{
+    display:flex;align-items:center;justify-content:space-between;
+    background:var(--code-hdr-bg);padding:9px 12px;
+    border-bottom:1px solid var(--code-hdr-border);
+    transition:background .2s,border-color .2s;
+  }
+  .code-editor-hdr-left{display:flex;align-items:center;gap:9px;min-width:0;}
+  .code-editor-filename{
+    display:flex;align-items:center;gap:6px;
+    font-size:12.5px;font-weight:500;color:var(--code-filename);
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+    transition:color .2s;
+  }
+  .code-editor-filename svg{width:13px;height:13px;flex-shrink:0;color:var(--code-icon);transition:color .2s;}
+  .json-preview-box{
+    width:100%;height:300px;
+    background:var(--code-bg);color:var(--code-text);
+    padding:14px;overflow:auto;margin:0;
+    font-family:'SFMono-Regular',Consolas,'Liberation Mono',Menlo,monospace;
+    font-size:12px;line-height:1.55;white-space:pre;
+    transition:background .2s,color .2s;
+    content-visibility:auto;
+    contain:content;
+  }
+  .json-preview-box .jt-key{color:var(--jt-key);}
+  .json-preview-box .jt-str{color:var(--jt-str);}
+  .json-preview-box .jt-num{color:var(--jt-num);}
+  .json-preview-box .jt-bool{color:var(--jt-bool);}
+  .json-preview-box .jt-null{color:var(--jt-null);}
+  .json-preview-box .jt-punc{color:var(--jt-punc);}
+  .copy-btn{
+    position:relative;
+    display:flex;align-items:center;justify-content:center;flex-shrink:0;
+    width:30px;height:30px;
+    background:var(--code-copy-bg);color:var(--code-copy-text);
+    border:1px solid var(--code-copy-border);border-radius:7px;
+    padding:0;cursor:pointer;transition:background .15s,color .15s;
+  }
+  .copy-btn svg{
+    width:14px;height:14px;position:absolute;
+    transition:opacity .2s ease,transform .25s ease;
+  }
+  .copy-btn .icon-check{opacity:0;transform:scale(.5);}
+  .copy-btn .icon-copy{opacity:1;transform:scale(1);}
+  .copy-btn.copied .icon-copy{opacity:0;transform:scale(.5);}
+  .copy-btn.copied .icon-check{opacity:1;transform:scale(1);}
+  .copy-btn:hover{background:var(--code-copy-hover-bg);}
+  .copy-btn.copied{background:var(--ok);color:#fff;border-color:var(--ok);}
+
+  .dropdown-menu{
+    position:absolute;
+    bottom:calc(100% + 8px);
+    left:0;
+    min-width:200px;
+    background:var(--surface);
+    border:1px solid var(--border);
+    border-radius:10px;
+    box-shadow:0 6px 18px rgba(14,165,233,0.15);
+    padding:6px;
+    display:none;
+    z-index:20;
+    transition:background .2s,border-color .2s;
+  }
+  @keyframes dropdownIn{
+    from{opacity:0; transform:translateY(6px);}
+    to{opacity:1; transform:translateY(0);}
+  }
+  .dropdown-menu.show{display:block;animation:dropdownIn .18s ease both;}
+  .dropdown-menu button{
+    display:block;width:100%;text-align:left;
+    font-family:inherit;font-size:13px;font-weight:500;
+    background:none;border:none;border-radius:7px;
+    color:var(--text);padding:9px 10px;cursor:pointer;
+  }
+  .dropdown-menu button:hover:not(:disabled){background:var(--accent-soft);color:var(--accent-dark);}
+  .dropdown-menu button:disabled{opacity:.4;cursor:not-allowed;}
+
+  footer{margin-top:24px;font-size:12px;color:var(--text-dim);text-align:center;display:flex;align-items:center;justify-content:center;gap:6px;}
+  footer svg{width:14px;height:14px;}
+</style>
+</head>
+<body>
+
+<div class="wrap">
+  <header>
+    <div class="header-top">
+      <svg class="logo" viewBox="0 0 32 32"><rect width="32" height="32" rx="7" fill="#0ea5e9"/><rect x="6" y="6" width="9" height="9" rx="2" fill="#ffffff"/><rect x="17" y="6" width="9" height="9" rx="2" fill="#bae6fd"/><rect x="6" y="17" width="9" height="9" rx="2" fill="#bae6fd"/><rect x="17" y="17" width="9" height="9" rx="2" fill="#ffffff"/></svg>
+      <div class="header-titles">
+        <h1>Piksel Dekoder</h1>
+        <p>Rasm ↔ JSON piksel ma'lumotlari</p>
+      </div>
+      <button class="theme-toggle" id="themeToggleBtn" aria-label="Mavzuni almashtirish" type="button">
+        <svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4.5"/><line x1="12" y1="1.5" x2="12" y2="4"/><line x1="12" y1="20" x2="12" y2="22.5"/><line x1="4.2" y1="4.2" x2="6" y2="6"/><line x1="18" y1="18" x2="19.8" y2="19.8"/><line x1="1.5" y1="12" x2="4" y2="12"/><line x1="20" y1="12" x2="22.5" y2="12"/><line x1="4.2" y1="19.8" x2="6" y2="18"/><line x1="18" y1="6" x2="19.8" y2="4.2"/></svg>
+        <svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 14.5A8.5 8.5 0 0 1 9.5 4a8.5 8.5 0 1 0 10.5 10.5z"/></svg>
+      </button>
+    </div>
+    <div class="tabbar-row">
+      <div class="tabbar" id="tabbar"></div>
+      <button class="tab-add" id="addTabBtn" aria-label="Yangi tab">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+      </button>
+    </div>
+  </header>
+
+  <div class="card">
+    <div class="dropzone-grid" id="dropzoneGrid">
+      <div class="dropzone" id="dropzoneImage">
+        <input type="file" id="fileInputImage" accept="image/*">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="9" cy="9" r="1.5" fill="currentColor" stroke="none"/><path d="m21 15-5-5L5 21"/></svg>
+        <div class="main-txt">Rasm tanlash</div>
+        <div class="sub-txt">JPG · PNG · WEBP</div>
+      </div>
+      <div class="dropzone" id="dropzoneJson">
+        <input type="file" id="fileInputJson" accept=".json,application/json">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+        <div class="main-txt">JSON tanlash</div>
+        <div class="sub-txt">avval eksport qilingan fayl</div>
+      </div>
+    </div>
+
+    <button class="change-file" id="changeFileBtn" style="display:none;">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>
+      Boshqa fayl tanlash
+    </button>
+
+    <div class="preview-area" id="previewArea">
+      <div class="canvas-frame"><canvas id="previewCanvas"></canvas></div>
+      <div class="meta-list">
+        <div class="meta-row">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+          <span>Fayl</span><b id="metaName">—</b>
+        </div>
+        <div class="meta-row">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/></svg>
+          <span>O'lcham</span><b id="metaDims">—</b>
+        </div>
+        <div class="meta-row" id="metaPixelsRow">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="1.5" fill="currentColor" stroke="none"/><circle cx="6" cy="6" r="1.5" fill="currentColor" stroke="none"/><circle cx="18" cy="6" r="1.5" fill="currentColor" stroke="none"/><circle cx="6" cy="18" r="1.5" fill="currentColor" stroke="none"/><circle cx="18" cy="18" r="1.5" fill="currentColor" stroke="none"/></svg>
+          <span>Piksellar</span><b id="metaPixels">—</b>
+        </div>
+      </div>
+    </div>
+
+    <div class="progress-wrap" id="progressWrap">
+      <div class="progress-labels"><span id="statusText">Skanerlanmoqda...</span><span id="progressCount">0 / 0</span></div>
+      <div class="progress-track"><div class="progress-fill" id="progressFill"></div></div>
+    </div>
+
+    <div class="btn-row" id="btnRowImage" style="display:none;">
+      <button class="btn primary btn-half" id="downloadHexBtn" disabled>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+        HEX
+      </button>
+      <button class="btn primary btn-half" id="downloadRgbBtn" disabled>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+        RGB
+      </button>
+    </div>
+
+    <div class="json-preview-wrap" id="jsonPreviewWrap">
+      <div class="code-editor">
+        <div class="code-editor-hdr">
+          <div class="code-editor-hdr-left">
+            <div class="code-editor-filename">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+              <span id="jsonPreviewLabel">rasm.json</span>
+            </div>
+          </div>
+          <button class="copy-btn" id="copyJsonBtn" type="button" aria-label="Nusxalash" title="Nusxalash">
+            <svg class="icon-copy" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+            <svg class="icon-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+          </button>
+        </div>
+        <pre class="json-preview-box" id="jsonPreviewBox"></pre>
+      </div>
+      <div class="btn-row">
+        <button class="btn primary btn-half" id="downloadJsonPreviewBtn">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          JSON fayl sifatida yuklash
+        </button>
+      </div>
+    </div>
+
+    <div class="btn-row" id="btnRowJson" style="display:none;">
+      <div class="split-btn split-btn-full" id="splitJson">
+        <button class="btn primary" id="downloadPngBtn">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          PNG yuklab olish
+        </button>
+        <button class="btn primary toggle-part" id="toggleJsonBtn" aria-label="Boshqa formatlar">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="18 15 12 9 6 15"/></svg>
+        </button>
+        <div class="dropdown-menu" id="menuJson">
+          <button id="downloadJpgBtn">JPG sifatida yuklash</button>
+          <button id="downloadWebpBtn">WEBP sifatida yuklash</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <footer>
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="10" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+    Barcha ishlov brauzeringizda bajariladi
+  </footer>
+</div>
+
+<script>
+(function(){
+  const dropzoneImage = document.getElementById('dropzoneImage');
+  const fileInputImage = document.getElementById('fileInputImage');
+  const dropzoneJson = document.getElementById('dropzoneJson');
+  const fileInputJson = document.getElementById('fileInputJson');
+  const dropzoneGrid = document.getElementById('dropzoneGrid');
+  const changeFileBtn = document.getElementById('changeFileBtn');
+  const previewArea = document.getElementById('previewArea');
+  const canvas = document.getElementById('previewCanvas');
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+
+  const metaName = document.getElementById('metaName');
+  const metaDims = document.getElementById('metaDims');
+  const metaPixels = document.getElementById('metaPixels');
+  const metaPixelsRow = document.getElementById('metaPixelsRow');
+
+  const progressWrap = document.getElementById('progressWrap');
+  const progressFill = document.getElementById('progressFill');
+  const progressCount = document.getElementById('progressCount');
+  const statusText = document.getElementById('statusText');
+
+  const btnRowImage = document.getElementById('btnRowImage');
+  const btnRowJson = document.getElementById('btnRowJson');
+  const downloadHexBtn = document.getElementById('downloadHexBtn');
+  const downloadRgbBtn = document.getElementById('downloadRgbBtn');
+  const jsonPreviewWrap = document.getElementById('jsonPreviewWrap');
+  const jsonPreviewBox = document.getElementById('jsonPreviewBox');
+  const jsonPreviewLabel = document.getElementById('jsonPreviewLabel');
+  const downloadJsonPreviewBtn = document.getElementById('downloadJsonPreviewBtn');
+  const copyJsonBtn = document.getElementById('copyJsonBtn');
+  const downloadPngBtn = document.getElementById('downloadPngBtn');
+  const downloadJpgBtn = document.getElementById('downloadJpgBtn');
+  const downloadWebpBtn = document.getElementById('downloadWebpBtn');
+
+  const splitJson = document.getElementById('splitJson');
+  const toggleJsonBtn = document.getElementById('toggleJsonBtn');
+  const menuJson = document.getElementById('menuJson');
+
+  function setupDropdown(splitEl, toggleBtn, menuEl){
+    toggleBtn.addEventListener('click', e => {
+      e.stopPropagation();
+      const isOpen = menuEl.classList.contains('show');
+      closeAllMenus();
+      if (!isOpen){ menuEl.classList.add('show'); splitEl.classList.add('open'); }
+    });
+    menuEl.addEventListener('click', e => {
+      if (e.target.tagName === 'BUTTON' && !e.target.disabled) closeAllMenus();
+    });
+  }
+  function closeAllMenus(){
+    menuJson.classList.remove('show');
+    splitJson.classList.remove('open');
+  }
+  document.addEventListener('click', closeAllMenus);
+  setupDropdown(splitJson, toggleJsonBtn, menuJson);
+
+  let currentFileName = 'rasm';
+  let pixelsHex = null;   // flat array, row-major, 6-char hex (no #)
+  let imgW = 0, imgH = 0;
+  let currentJsonContent = null;
+  let currentJsonDownloadName = null;
+
+  // ---------- Tabs (localStorage) ----------
+  const tabbar = document.getElementById('tabbar');
+  const addTabBtn = document.getElementById('addTabBtn');
+  const MAX_TABS = 20;
+  let tabs = [];
+  let activeTabId = null;
+  let justAddedTabId = null;
+
+  function nextId(){
+    let n = parseInt(localStorage.getItem('pd_next_id') || '1', 10);
+    localStorage.setItem('pd_next_id', String(n + 1));
+    return n;
+  }
+  function persistTabs(){
+    try{ localStorage.setItem('pd_tabs', JSON.stringify(tabs)); }catch(e){}
+  }
+  function persistActive(){
+    try{ localStorage.setItem('pd_active', String(activeTabId)); }catch(e){}
+  }
+
+  function initTabs(){
+    try{
+      const stored = JSON.parse(localStorage.getItem('pd_tabs') || 'null');
+      tabs = (Array.isArray(stored) && stored.length) ? stored : [{ id: nextId(), type: null }];
+    }catch(e){ tabs = [{ id: nextId(), type: null }]; }
+    persistTabs();
+
+    let active = parseInt(localStorage.getItem('pd_active'), 10);
+    if (!tabs.find(t => t.id === active)) active = tabs[0].id;
+    activeTabId = active;
+    persistActive();
+
+    renderTabBar();
+    renderTabContent(activeTabId);
+  }
+
+  function tabLabel(type){
+    if (type === 'image') return 'Rasm';
+    if (type === 'json') return 'JSON';
+    return 'Yangi';
+  }
+
+  function renderTabBar(){
+    tabbar.innerHTML = '';
+    tabs.forEach(t => {
+      const el = document.createElement('div');
+      el.className = 'tab' + (t.id === activeTabId ? ' active' : '') + (t.id === justAddedTabId ? ' tab-enter' : '');
+      el.innerHTML = '<span>' + tabLabel(t.type) + '</span>' +
+        '<span class="tab-close" title="Yopish"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></span>';
+      el.addEventListener('click', () => switchTab(t.id));
+      el.querySelector('.tab-close').addEventListener('click', e => { e.stopPropagation(); closeTab(t.id); });
+      tabbar.appendChild(el);
+    });
+    addTabBtn.disabled = tabs.length >= MAX_TABS;
+    justAddedTabId = null;
+  }
+
+  function renderTabContent(id){
+    resetButtons();
+    let raw = null;
+    try{ raw = localStorage.getItem('pd_data_' + id); }catch(e){}
+
+    if (!raw){
+      dropzoneGrid.style.display = 'grid';
+      changeFileBtn.style.display = 'none';
+      previewArea.classList.remove('show');
+      currentFileName = 'rasm'; pixelsHex = null; imgW = 0; imgH = 0;
+      return;
+    }
+
+    let data;
+    try{ data = JSON.parse(raw); }catch(e){ return; }
+
+    if (data.type === 'image'){
+      currentFileName = data.fileName; imgW = data.width; imgH = data.height; pixelsHex = data.pixelsHex;
+      canvas.width = imgW; canvas.height = imgH;
+      const imageData = ctx.createImageData(imgW, imgH);
+      const d = imageData.data;
+      for (let i=0;i<pixelsHex.length;i++){
+        const h = pixelsHex[i], off = i*4;
+        d[off]=parseInt(h.slice(0,2),16); d[off+1]=parseInt(h.slice(2,4),16); d[off+2]=parseInt(h.slice(4,6),16); d[off+3]=255;
+      }
+      ctx.putImageData(imageData, 0, 0);
+      metaName.textContent = currentFileName;
+      metaDims.textContent = imgW + ' × ' + imgH;
+      metaPixels.textContent = (imgW*imgH).toLocaleString('en-US');
+      metaPixelsRow.classList.toggle('warn', imgW*imgH > 1500000);
+      previewArea.classList.add('show');
+      btnRowImage.style.display = 'flex';
+      downloadHexBtn.disabled = false; downloadRgbBtn.disabled = false;
+      collapseDropzone();
+    } else if (data.type === 'json'){
+      currentFileName = data.fileName; imgW = data.width; imgH = data.height;
+      canvas.width = imgW; canvas.height = imgH;
+      const imageData = ctx.createImageData(imgW, imgH);
+      const d = imageData.data;
+      const keys = Object.keys(data.piksellar);
+      for (let i=0;i<keys.length;i++){
+        const val = data.piksellar[keys[i]], off = i*4;
+        if (Array.isArray(val)){ d[off]=val[0]; d[off+1]=val[1]; d[off+2]=val[2]; }
+        else { const h = String(val).replace('#',''); d[off]=parseInt(h.slice(0,2),16); d[off+1]=parseInt(h.slice(2,4),16); d[off+2]=parseInt(h.slice(4,6),16); }
+        d[off+3]=255;
+      }
+      ctx.putImageData(imageData, 0, 0);
+      metaName.textContent = currentFileName;
+      metaDims.textContent = imgW + ' × ' + imgH;
+      metaPixels.textContent = (imgW*imgH).toLocaleString('en-US');
+      metaPixelsRow.classList.remove('warn');
+      previewArea.classList.add('show');
+      btnRowJson.style.display = 'flex';
+      collapseDropzone();
+    }
+  }
+
+  function saveActiveTabData(obj){
+    try{ localStorage.setItem('pd_data_' + activeTabId, JSON.stringify(obj)); }
+    catch(e){ alert('Xotira yetarli emas. Ba\'zi eski tablarni yoping.'); return; }
+    const t = tabs.find(t => t.id === activeTabId);
+    if (t){ t.type = obj.type; persistTabs(); renderTabBar(); }
+  }
+
+  function clearActiveTabData(){
+    try{ localStorage.removeItem('pd_data_' + activeTabId); }catch(e){}
+    const t = tabs.find(t => t.id === activeTabId);
+    if (t){ t.type = null; persistTabs(); renderTabBar(); }
+  }
+
+  function switchTab(id){
+    if (id === activeTabId) return;
+    activeTabId = id;
+    persistActive();
+    renderTabBar();
+    renderTabContent(id);
+  }
+
+  addTabBtn.addEventListener('click', () => {
+    if (tabs.length >= MAX_TABS) return;
+    const id = nextId();
+    tabs.push({ id, type: null });
+    persistTabs();
+    justAddedTabId = id;
+    switchTab(id);
+  });
+
+  function closeTab(id){
+    try{ localStorage.removeItem('pd_data_' + id); }catch(e){}
+    tabs = tabs.filter(t => t.id !== id);
+    if (tabs.length === 0) tabs = [{ id: nextId(), type: null }];
+    persistTabs();
+    if (activeTabId === id){
+      activeTabId = tabs[0].id;
+      persistActive();
+    }
+    renderTabBar();
+    renderTabContent(activeTabId);
+  }
+
+  dropzoneImage.addEventListener('click', () => fileInputImage.click());
+  dropzoneImage.addEventListener('dragover', e => { e.preventDefault(); dropzoneImage.classList.add('drag'); });
+  dropzoneImage.addEventListener('dragleave', () => dropzoneImage.classList.remove('drag'));
+  dropzoneImage.addEventListener('drop', e => {
+    e.preventDefault();
+    dropzoneImage.classList.remove('drag');
+    if (e.dataTransfer.files && e.dataTransfer.files[0]) handleFile(e.dataTransfer.files[0]);
+  });
+  fileInputImage.addEventListener('change', e => {
+    if (e.target.files && e.target.files[0]) handleFile(e.target.files[0]);
+  });
+
+  dropzoneJson.addEventListener('click', () => fileInputJson.click());
+  dropzoneJson.addEventListener('dragover', e => { e.preventDefault(); dropzoneJson.classList.add('drag'); });
+  dropzoneJson.addEventListener('dragleave', () => dropzoneJson.classList.remove('drag'));
+  dropzoneJson.addEventListener('drop', e => {
+    e.preventDefault();
+    dropzoneJson.classList.remove('drag');
+    if (e.dataTransfer.files && e.dataTransfer.files[0]) handleFile(e.dataTransfer.files[0]);
+  });
+  fileInputJson.addEventListener('change', e => {
+    if (e.target.files && e.target.files[0]) handleFile(e.target.files[0]);
+  });
+
+  function handleFile(file){
+    currentFileName = file.name.replace(/\.[^/.]+$/, '') || 'rasm';
+    const isJson = file.type === 'application/json' || file.name.toLowerCase().endsWith('.json');
+    if (isJson){
+      const reader = new FileReader();
+      reader.onload = e => {
+        try{ handleJsonImport(JSON.parse(e.target.result)); }
+        catch(err){ alert('JSON faylni o\'qib bo\'lmadi: ' + err.message); }
+      };
+      reader.readAsText(file);
+      return;
+    }
+    if (!file.type.startsWith('image/')){
+      alert('Iltimos, rasm yoki JSON fayl tanlang.');
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = e => {
+      const img = new Image();
+      img.onload = () => handleImage(img);
+      img.src = e.target.result;
+    };
+    reader.readAsDataURL(file);
+  }
+
+  function resetButtons(){
+    btnRowImage.style.display = 'none';
+    btnRowJson.style.display = 'none';
+    downloadHexBtn.disabled = true;
+    downloadRgbBtn.disabled = true;
+    jsonPreviewWrap.classList.remove('show');
+    jsonPreviewBox.innerHTML = '';
+    currentJsonContent = null;
+    currentJsonDownloadName = null;
+    closeAllMenus();
+  }
+
+  function collapseDropzone(){
+    dropzoneGrid.style.display = 'none';
+    changeFileBtn.style.display = 'flex';
+  }
+
+  changeFileBtn.addEventListener('click', () => {
+    dropzoneGrid.style.display = 'grid';
+    changeFileBtn.style.display = 'none';
+    previewArea.classList.remove('show');
+    resetButtons();
+    fileInputImage.value = '';
+    fileInputJson.value = '';
+    clearActiveTabData();
+  });
+
+  // ---------- Image -> scan -> JSON/HEX/RGB ----------
+  function handleImage(img){
+    resetButtons();
+    collapseDropzone();
+    imgW = img.width; imgH = img.height;
+    canvas.width = imgW; canvas.height = imgH;
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(img, 0, 0);
+
+    metaName.textContent = currentFileName;
+    metaDims.textContent = imgW + ' × ' + imgH;
+    metaPixels.textContent = (imgW*imgH).toLocaleString('en-US');
+    metaPixelsRow.classList.toggle('warn', imgW*imgH > 1500000);
+    previewArea.classList.add('show');
+    btnRowImage.style.display = 'flex';
+
+    let imageData;
+    try{ imageData = ctx.getImageData(0, 0, imgW, imgH); }
+    catch(err){ alert('Rasm o\'qishda xatolik: ' + err.message); return; }
+
+    const data = imageData.data;
+    const total = imgW * imgH;
+    pixelsHex = new Array(total);
+
+    progressWrap.classList.add('show');
+    statusText.textContent = 'Skanerlanmoqda...';
+    let idx = 0;
+    const CHUNK = 20000;
+
+    function step(){
+      const end = Math.min(idx + CHUNK, total);
+      for (; idx < end; idx++){
+        const off = idx * 4;
+        pixelsHex[idx] = toHex(data[off]) + toHex(data[off+1]) + toHex(data[off+2]);
+      }
+      progressFill.style.width = Math.round((idx/total)*100) + '%';
+      progressCount.textContent = idx.toLocaleString('en-US') + ' / ' + total.toLocaleString('en-US');
+      if (idx < total){ setTimeout(step, 0); }
+      else{
+        statusText.textContent = 'Tayyor';
+        progressWrap.classList.remove('show');
+        downloadHexBtn.disabled = false;
+        downloadRgbBtn.disabled = false;
+        saveActiveTabData({ type: 'image', fileName: currentFileName, width: imgW, height: imgH, pixelsHex });
+      }
+    }
+    setTimeout(step, 0);
+  }
+
+  function toHex(n){ return n.toString(16).padStart(2,'0'); }
+
+  downloadHexBtn.addEventListener('click', () => buildJsonExport('hex'));
+  downloadRgbBtn.addEventListener('click', () => buildJsonExport('rgb'));
+
+  function buildJsonExport(mode){
+    if (!pixelsHex || !pixelsHex.length) return;
+
+    downloadHexBtn.disabled = true;
+    downloadRgbBtn.disabled = true;
+    progressWrap.classList.add('show');
+    statusText.textContent = 'JSON tayyorlanmoqda...';
+    progressFill.style.width = '0%';
+    progressCount.textContent = '0 / ' + pixelsHex.length.toLocaleString('en-US');
+
+    const total = pixelsHex.length;
+    const rowLines = new Array(imgH);
+    let idx = 0;
+    const CHUNK = 20000;
+
+    function fillStep(){
+      const end = Math.min(idx + CHUNK, total);
+      for (; idx < end; idx++){
+        const r = Math.floor(idx / imgW), c = idx % imgW;
+        let rowArr = rowLines[r];
+        if (!rowArr) rowArr = rowLines[r] = new Array(imgW);
+        if (mode === 'hex'){
+          rowArr[c] = '"' + (c + 1) + '":"#' + pixelsHex[idx] + '"';
+        } else {
+          const h = pixelsHex[idx];
+          const rr = parseInt(h.slice(0, 2), 16), gg = parseInt(h.slice(2, 4), 16), bb = parseInt(h.slice(4, 6), 16);
+          rowArr[c] = '"' + (c + 1) + '":[' + rr + ',' + gg + ',' + bb + ']';
+        }
+      }
+      progressFill.style.width = Math.round((idx / total) * 90) + '%';
+      progressCount.textContent = idx.toLocaleString('en-US') + ' / ' + total.toLocaleString('en-US');
+      if (idx < total){ setTimeout(fillStep, 0); }
+      else { statusText.textContent = 'Yig\'ilmoqda...'; setTimeout(() => joinStep(0, []), 0); }
+    }
+
+    function joinStep(r, bodyLines){
+      const end = Math.min(r + 400, imgH);
+      for (; r < end; r++){
+        bodyLines.push('    "l' + (r + 1) + '": {' + rowLines[r].join(',') + '}');
+      }
+      progressFill.style.width = (90 + Math.round((r / imgH) * 10)) + '%';
+      if (r < imgH){ setTimeout(() => joinStep(r, bodyLines), 0); }
+      else finalize(bodyLines);
+    }
+
+    function finalize(bodyLines){
+      const metaStr = JSON.stringify({
+        fileName: currentFileName, width: imgW, height: imgH, pixelCount: imgW * imgH,
+        createdAt: new Date().toISOString(), format: 'piksel-dekoder-' + mode + '-v1'
+      }, null, 2).replace(/\n/g, '\n  ');
+      const content = '{\n  "meta": ' + metaStr + ',\n  "piksellar": {\n' + bodyLines.join(',\n') + '\n  }\n}';
+
+      statusText.textContent = 'Tayyor';
+      progressWrap.classList.remove('show');
+      downloadHexBtn.disabled = false;
+      downloadRgbBtn.disabled = false;
+
+      showJsonPreview(content, currentFileName + '_' + mode + '.json');
+    }
+
+    setTimeout(fillStep, 0);
+  }
+
+  function showJsonPreview(content, filename){
+    currentJsonContent = content;
+    currentJsonDownloadName = filename;
+    jsonPreviewLabel.textContent = filename;
+    copyJsonBtn.classList.remove('copied');
+    jsonPreviewWrap.classList.add('show');
+
+    // Rangsiz, oddiy matn (yagona DOM text-node) — hech qanday kesishsiz, l1000 bo'lsa ham
+    // to'liq ko'rsatiladi. content-visibility:auto scroll paytida ko'rinmayotgan qismni
+    // render qilmay tursin deb qo'yilgan — shu bilan katta faylda ham qotib qolmaydi.
+    jsonPreviewBox.textContent = content;
+  }
+
+  downloadJsonPreviewBtn.addEventListener('click', () => {
+    if (!currentJsonContent) return;
+    downloadBlob(currentJsonContent, 'application/json', currentJsonDownloadName);
+  });
+
+  copyJsonBtn.addEventListener('click', () => {
+    if (!currentJsonContent) return;
+    const done = () => {
+      copyJsonBtn.classList.add('copied');
+      setTimeout(() => {
+        copyJsonBtn.classList.remove('copied');
+      }, 1500);
+    };
+    if (navigator.clipboard && navigator.clipboard.writeText){
+      navigator.clipboard.writeText(currentJsonContent).then(done).catch(() => fallbackCopy(currentJsonContent, done));
+    } else {
+      fallbackCopy(currentJsonContent, done);
+    }
+  });
+
+  function fallbackCopy(text, done){
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    try{ document.execCommand('copy'); done(); }catch(e){}
+    document.body.removeChild(ta);
+  }
+
+  // ---------- JSON (HEX yoki RGB) -> reconstruct -> PNG/JPG/WEBP ----------
+  function handleJsonImport(payload){
+    if (!payload || !payload.meta || !payload.piksellar) throw new Error('Format mos emas');
+    const { width, height, fileName } = payload.meta;
+
+    resetButtons();
+    collapseDropzone();
+    imgW = width; imgH = height;
+    currentFileName = fileName || currentFileName;
+    canvas.width = width; canvas.height = height;
+    const imageData = ctx.createImageData(width, height);
+    const data = imageData.data;
+
+    for (let r=1; r<=height; r++){
+      const row = payload.piksellar['l'+r];
+      if (!row) throw new Error('l'+r+' qatori topilmadi');
+      for (let c=1; c<=width; c++){
+        const val = row[c];
+        if (val === undefined) throw new Error('l'+r+' qatorida '+c+'-ustun topilmadi');
+        const i = (r-1)*width + (c-1);
+        const off = i*4;
+        if (Array.isArray(val)){
+          data[off] = val[0]; data[off+1] = val[1]; data[off+2] = val[2];
+        } else {
+          const h = String(val).replace('#','');
+          data[off] = parseInt(h.slice(0,2),16);
+          data[off+1] = parseInt(h.slice(2,4),16);
+          data[off+2] = parseInt(h.slice(4,6),16);
+        }
+        data[off+3] = 255;
+      }
+    }
+    ctx.putImageData(imageData, 0, 0);
+
+    metaName.textContent = currentFileName;
+    metaDims.textContent = width + ' × ' + height;
+    metaPixels.textContent = (width*height).toLocaleString('en-US');
+    metaPixelsRow.classList.remove('warn');
+    previewArea.classList.add('show');
+    btnRowJson.style.display = 'flex';
+    saveActiveTabData({ type: 'json', fileName: currentFileName, width, height, piksellar: payload.piksellar });
+  }
+
+  downloadPngBtn.addEventListener('click', () => {
+    canvas.toBlob(blob => downloadBlobDirect(blob, currentFileName + '.png'), 'image/png');
+  });
+  downloadJpgBtn.addEventListener('click', () => {
+    canvas.toBlob(blob => downloadBlobDirect(blob, currentFileName + '.jpg'), 'image/jpeg', 0.95);
+  });
+  downloadWebpBtn.addEventListener('click', () => {
+    canvas.toBlob(blob => downloadBlobDirect(blob, currentFileName + '.webp'), 'image/webp', 0.95);
+  });
+
+  function downloadBlob(content, type, filename){
+    downloadBlobDirect(new Blob([content], {type}), filename);
+  }
+  function downloadBlobDirect(blob, filename){
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = filename;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
+
+  // ---------- Theme toggle ----------
+  const themeToggleBtn = document.getElementById('themeToggleBtn');
+  function setTheme(mode){
+    if (mode === 'dark') document.documentElement.setAttribute('data-theme', 'dark');
+    else document.documentElement.removeAttribute('data-theme');
+  }
+  const prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+  setTheme(prefersDark ? 'dark' : 'light');
+  themeToggleBtn.addEventListener('click', () => {
+    const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+    setTheme(isDark ? 'light' : 'dark');
+  });
+
+  initTabs();
+})();
+</script>
+
+</body>
+</html>
