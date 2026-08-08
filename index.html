@@ -513,14 +513,63 @@
   let imgW = 0, imgH = 0;
   let currentJsonContent = null;
   let currentJsonDownloadName = null;
+  let busy = false; // true while an image/JSON is being decoded, scanned, or saved —
+                     // blocks tab switching/adding/closing to prevent cross-tab data corruption.
+  function busyGuard(){
+    if (busy){ alert('Iltimos, joriy amal (rasm/JSON qayta ishlanmoqda) tugashini kuting.'); return true; }
+    return false;
+  }
 
-  // ---------- Tabs (localStorage) ----------
+  // ---------- Tabs (localStorage: light metadata / IndexedDB: heavy pixel data) ----------
   const tabbar = document.getElementById('tabbar');
   const addTabBtn = document.getElementById('addTabBtn');
-  const MAX_TABS = 2;
+  const MAX_TABS = 20;
   let tabs = [];
   let activeTabId = null;
   let justAddedTabId = null;
+
+  // IndexedDB has a far larger quota than localStorage (which caps around ~5MB
+  // total per origin). Large photos can easily produce many MB of pixel data,
+  // so that data is stored in IndexedDB instead. Only small tab metadata
+  // (id/type/active id) stays in localStorage.
+  const IDB_NAME = 'PikselDekoderDB';
+  const IDB_STORE = 'tabData';
+  let idbPromise = null;
+  function openIdb(){
+    if (idbPromise) return idbPromise;
+    idbPromise = new Promise((resolve, reject) => {
+      if (!window.indexedDB){ reject(new Error('IndexedDB mavjud emas')); return; }
+      const req = indexedDB.open(IDB_NAME, 1);
+      req.onupgradeneeded = () => { req.result.createObjectStore(IDB_STORE); };
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    });
+    return idbPromise;
+  }
+  function idbGet(key){
+    return openIdb().then(db => new Promise((resolve, reject) => {
+      const tx = db.transaction(IDB_STORE, 'readonly');
+      const req = tx.objectStore(IDB_STORE).get(key);
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    })).catch(() => undefined);
+  }
+  function idbSet(key, value){
+    return openIdb().then(db => new Promise((resolve, reject) => {
+      const tx = db.transaction(IDB_STORE, 'readwrite');
+      tx.objectStore(IDB_STORE).put(value, key);
+      tx.oncomplete = () => resolve(true);
+      tx.onerror = () => reject(tx.error);
+    }));
+  }
+  function idbDelete(key){
+    return openIdb().then(db => new Promise((resolve, reject) => {
+      const tx = db.transaction(IDB_STORE, 'readwrite');
+      tx.objectStore(IDB_STORE).delete(key);
+      tx.oncomplete = () => resolve(true);
+      tx.onerror = () => reject(tx.error);
+    })).catch(() => false);
+  }
 
   function nextId(){
     let n = parseInt(localStorage.getItem('pd_next_id') || '1', 10);
@@ -571,21 +620,19 @@
     justAddedTabId = null;
   }
 
-  function renderTabContent(id){
+  async function renderTabContent(id){
     resetButtons();
-    let raw = null;
-    try{ raw = localStorage.getItem('pd_data_' + id); }catch(e){}
+    let data = null;
+    try{ data = await idbGet('pd_data_' + id); }catch(e){}
 
-    if (!raw){
+    if (id !== activeTabId) return; // user may have switched tabs while awaiting
+    if (!data){
       dropzoneGrid.style.display = 'grid';
       changeFileBtn.style.display = 'none';
       previewArea.classList.remove('show');
       currentFileName = 'rasm'; pixelsHex = null; imgW = 0; imgH = 0;
       return;
     }
-
-    let data;
-    try{ data = JSON.parse(raw); }catch(e){ return; }
 
     if (data.type === 'image'){
       currentFileName = data.fileName; imgW = data.width; imgH = data.height; pixelsHex = data.pixelsHex;
@@ -628,20 +675,22 @@
     }
   }
 
-  function saveActiveTabData(obj){
-    try{ localStorage.setItem('pd_data_' + activeTabId, JSON.stringify(obj)); }
-    catch(e){ alert('Xotira yetarli emas. Ba\'zi eski tablarni yoping.'); return; }
-    const t = tabs.find(t => t.id === activeTabId);
+  async function saveActiveTabData(obj){
+    const forTabId = activeTabId;
+    try{ await idbSet('pd_data_' + forTabId, obj); }
+    catch(e){ alert('Ma\'lumotni saqlab bo\'lmadi. Qurilmangizda bo\'sh joy yetarli emas bo\'lishi mumkin.'); return; }
+    const t = tabs.find(t => t.id === forTabId);
     if (t){ t.type = obj.type; persistTabs(); renderTabBar(); }
   }
 
   function clearActiveTabData(){
-    try{ localStorage.removeItem('pd_data_' + activeTabId); }catch(e){}
+    idbDelete('pd_data_' + activeTabId);
     const t = tabs.find(t => t.id === activeTabId);
     if (t){ t.type = null; persistTabs(); renderTabBar(); }
   }
 
   function switchTab(id){
+    if (busyGuard()) return;
     if (id === activeTabId) return;
     activeTabId = id;
     persistActive();
@@ -650,6 +699,7 @@
   }
 
   addTabBtn.addEventListener('click', () => {
+    if (busyGuard()) return;
     if (tabs.length >= MAX_TABS) return;
     const id = nextId();
     tabs.push({ id, type: null });
@@ -659,7 +709,8 @@
   });
 
   function closeTab(id){
-    try{ localStorage.removeItem('pd_data_' + id); }catch(e){}
+    if (busyGuard()) return;
+    idbDelete('pd_data_' + id);
     tabs = tabs.filter(t => t.id !== id);
     if (tabs.length === 0) tabs = [{ id: nextId(), type: null }];
     persistTabs();
@@ -696,14 +747,21 @@
   });
 
   function handleFile(file){
+    if (busyGuard()) return;
     currentFileName = file.name.replace(/\.[^/.]+$/, '') || 'rasm';
     const isJson = file.type === 'application/json' || file.name.toLowerCase().endsWith('.json');
     if (isJson){
+      busy = true;
       const reader = new FileReader();
       reader.onload = e => {
-        try{ handleJsonImport(JSON.parse(e.target.result)); }
-        catch(err){ alert('JSON faylni o\'qib bo\'lmadi: ' + err.message); }
+        let payload;
+        try{ payload = JSON.parse(e.target.result); }
+        catch(err){ alert('JSON faylni o\'qib bo\'lmadi: ' + err.message); busy = false; return; }
+        handleJsonImport(payload)
+          .then(() => { busy = false; })
+          .catch(err => { alert('JSON faylni o\'qib bo\'lmadi: ' + err.message); busy = false; });
       };
+      reader.onerror = () => { alert('Faylni o\'qib bo\'lmadi.'); busy = false; };
       reader.readAsText(file);
       return;
     }
@@ -711,13 +769,46 @@
       alert('Iltimos, rasm yoki JSON fayl tanlang.');
       return;
     }
+    busy = true;
     const reader = new FileReader();
     reader.onload = e => loadImageRobust(e.target.result, file.type);
-    reader.onerror = () => alert('Faylni o\'qib bo\'lmadi.');
+    reader.onerror = () => { alert('Faylni o\'qib bo\'lmadi.'); busy = false; };
     reader.readAsArrayBuffer(file);
   }
 
   // ---------- Robust image decode (auto-fixes broken/ICC WEBP etc.) ----------
+  function simplifyWebp(buffer){
+    try{
+      const view = new DataView(buffer);
+      if (view.getUint32(0,false) !== 0x52494646) return null; // 'RIFF'
+      if (view.getUint32(8,false) !== 0x57454250) return null; // 'WEBP'
+      let offset = 12, hasVP8X = false, imageChunk = null;
+      while (offset + 8 <= buffer.byteLength){
+        const fourcc = String.fromCharCode(view.getUint8(offset),view.getUint8(offset+1),view.getUint8(offset+2),view.getUint8(offset+3));
+        const size = view.getUint32(offset+4,true);
+        const paddedSize = size + (size % 2);
+        if (fourcc === 'VP8X') hasVP8X = true;
+        if (fourcc === 'VP8 ' || fourcc === 'VP8L') imageChunk = { fourcc, dataOffset: offset+8, size };
+        offset += 8 + paddedSize;
+      }
+      if (!hasVP8X || !imageChunk) return null; // already simple, animated, or unsupported layout
+      const chunkPadded = imageChunk.size + (imageChunk.size % 2);
+      const newLen = 12 + 8 + chunkPadded;
+      const newBuf = new ArrayBuffer(newLen);
+      const nv = new DataView(newBuf);
+      const dst = new Uint8Array(newBuf);
+      dst[0]=0x52; dst[1]=0x49; dst[2]=0x46; dst[3]=0x46; // RIFF
+      nv.setUint32(4, newLen - 8, true);
+      dst[8]=0x57; dst[9]=0x45; dst[10]=0x42; dst[11]=0x50; // WEBP
+      const fc = imageChunk.fourcc;
+      dst[12]=fc.charCodeAt(0); dst[13]=fc.charCodeAt(1); dst[14]=fc.charCodeAt(2); dst[15]=fc.charCodeAt(3);
+      nv.setUint32(16, imageChunk.size, true);
+      const src = new Uint8Array(buffer);
+      dst.set(src.subarray(imageChunk.dataOffset, imageChunk.dataOffset + imageChunk.size), 20);
+      return newBuf;
+    }catch(e){ return null; }
+  }
+
   function stripWebpIcc(buffer){
     try{
       const view = new DataView(buffer);
@@ -762,6 +853,10 @@
     const img = new Image();
     img.onload = () => handleImage(img);
     img.onerror = () => {
+      if (!attempted.simplify){
+        const simplified = simplifyWebp(buffer);
+        if (simplified){ attempted.simplify = true; loadImageRobust(simplified, 'image/webp', attempted); return; }
+      }
       if (!attempted.icc){
         const stripped = stripWebpIcc(buffer);
         if (stripped){ attempted.icc = true; loadImageRobust(stripped, 'image/webp', attempted); return; }
@@ -780,6 +875,7 @@
 
   function showDecodeError(){
     alert('Rasmni ochib bo\'lmadi. Fayl shikastlangan bo\'lishi mumkin. Rasmni PNG yoki JPG formatiga o\'tkazib qayta urinib ko\'ring.');
+    busy = false;
   }
 
   function resetButtons(){
@@ -800,6 +896,7 @@
   }
 
   changeFileBtn.addEventListener('click', () => {
+    if (busyGuard()) return;
     dropzoneGrid.style.display = 'grid';
     changeFileBtn.style.display = 'none';
     previewArea.classList.remove('show');
@@ -817,6 +914,7 @@
     canvas.width = imgW; canvas.height = imgH;
     ctx.imageSmoothingEnabled = false;
     ctx.drawImage(img, 0, 0);
+    if (typeof img.close === 'function') img.close(); // release ImageBitmap memory promptly
 
     metaName.textContent = currentFileName;
     metaDims.textContent = imgW + ' × ' + imgH;
@@ -827,7 +925,7 @@
 
     let imageData;
     try{ imageData = ctx.getImageData(0, 0, imgW, imgH); }
-    catch(err){ alert('Rasm o\'qishda xatolik: ' + err.message); return; }
+    catch(err){ alert('Rasm o\'qishda xatolik: ' + err.message); busy = false; return; }
 
     const data = imageData.data;
     const total = imgW * imgH;
@@ -852,7 +950,8 @@
         progressWrap.classList.remove('show');
         downloadHexBtn.disabled = false;
         downloadRgbBtn.disabled = false;
-        saveActiveTabData({ type: 'image', fileName: currentFileName, width: imgW, height: imgH, pixelsHex });
+        saveActiveTabData({ type: 'image', fileName: currentFileName, width: imgW, height: imgH, pixelsHex })
+          .then(() => { busy = false; });
       }
     }
     setTimeout(step, 0);
@@ -971,7 +1070,7 @@
   }
 
   // ---------- JSON (HEX yoki RGB) -> reconstruct -> PNG/JPG/WEBP ----------
-  function handleJsonImport(payload){
+  async function handleJsonImport(payload){
     if (!payload || !payload.meta || !payload.piksellar) throw new Error('Format mos emas');
     const { width, height, fileName } = payload.meta;
 
@@ -1010,7 +1109,7 @@
     metaPixelsRow.classList.remove('warn');
     previewArea.classList.add('show');
     btnRowJson.style.display = 'flex';
-    saveActiveTabData({ type: 'json', fileName: currentFileName, width, height, piksellar: payload.piksellar });
+    await saveActiveTabData({ type: 'json', fileName: currentFileName, width, height, piksellar: payload.piksellar });
   }
 
   downloadPngBtn.addEventListener('click', () => {
