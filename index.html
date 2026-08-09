@@ -651,40 +651,72 @@ if (typeof exports === 'object' && typeof module === 'object') {
       canvas.width = imgW; canvas.height = imgH;
       const imageData = ctx.createImageData(imgW, imgH);
       const d = imageData.data;
-      for (let i=0;i<pixelsHex.length;i++){
+      const total = pixelsHex.length;
+      runChunked(id, total, (i) => {
         const h = pixelsHex[i], off = i*4;
         d[off]=parseInt(h.slice(0,2),16); d[off+1]=parseInt(h.slice(2,4),16); d[off+2]=parseInt(h.slice(4,6),16); d[off+3]=255;
-      }
-      ctx.putImageData(imageData, 0, 0);
-      metaName.textContent = currentFileName;
-      metaDims.textContent = imgW + ' × ' + imgH;
-      metaPixels.textContent = (imgW*imgH).toLocaleString('en-US');
-      metaPixelsRow.classList.toggle('warn', imgW*imgH > 1500000);
-      previewArea.classList.add('show');
-      btnRowImage.style.display = 'flex';
-      downloadHexBtn.disabled = false; downloadRgbBtn.disabled = false;
-      collapseDropzone();
+      }, () => {
+        if (id !== activeTabId) return; // user switched tabs again while this was filling in
+        ctx.putImageData(imageData, 0, 0);
+        metaName.textContent = currentFileName;
+        metaDims.textContent = imgW + ' × ' + imgH;
+        metaPixels.textContent = (imgW*imgH).toLocaleString('en-US');
+        metaPixelsRow.classList.toggle('warn', imgW*imgH > 1500000);
+        previewArea.classList.add('show');
+        btnRowImage.style.display = 'flex';
+        downloadHexBtn.disabled = false; downloadRgbBtn.disabled = false;
+        collapseDropzone();
+      });
     } else if (data.type === 'json'){
       currentFileName = data.fileName; imgW = data.width; imgH = data.height;
       canvas.width = imgW; canvas.height = imgH;
       const imageData = ctx.createImageData(imgW, imgH);
       const d = imageData.data;
-      const keys = Object.keys(data.piksellar);
-      for (let i=0;i<keys.length;i++){
-        const val = data.piksellar[keys[i]], off = i*4;
-        if (Array.isArray(val)){ d[off]=val[0]; d[off+1]=val[1]; d[off+2]=val[2]; }
+      const total = imgW * imgH;
+      // piksellar is row-keyed ("l1","l2",...), each holding a column-keyed
+      // object ("1","2",...) — must be walked row/col, not flattened via
+      // Object.keys(piksellar), otherwise the reconstructed image is garbage.
+      runChunked(id, total, (i) => {
+        const r = Math.floor(i/imgW) + 1, c = (i % imgW) + 1;
+        const row = data.piksellar['l'+r];
+        const val = row ? row[c] : undefined;
+        const off = i*4;
+        if (val === undefined){ d[off]=0; d[off+1]=0; d[off+2]=0; }
+        else if (Array.isArray(val)){ d[off]=val[0]; d[off+1]=val[1]; d[off+2]=val[2]; }
         else { const h = String(val).replace('#',''); d[off]=parseInt(h.slice(0,2),16); d[off+1]=parseInt(h.slice(2,4),16); d[off+2]=parseInt(h.slice(4,6),16); }
         d[off+3]=255;
-      }
-      ctx.putImageData(imageData, 0, 0);
-      metaName.textContent = currentFileName;
-      metaDims.textContent = imgW + ' × ' + imgH;
-      metaPixels.textContent = (imgW*imgH).toLocaleString('en-US');
-      metaPixelsRow.classList.remove('warn');
-      previewArea.classList.add('show');
-      btnRowJson.style.display = 'flex';
-      collapseDropzone();
+      }, () => {
+        if (id !== activeTabId) return;
+        ctx.putImageData(imageData, 0, 0);
+        metaName.textContent = currentFileName;
+        metaDims.textContent = imgW + ' × ' + imgH;
+        metaPixels.textContent = (imgW*imgH).toLocaleString('en-US');
+        metaPixelsRow.classList.remove('warn');
+        previewArea.classList.add('show');
+        btnRowJson.style.display = 'flex';
+        collapseDropzone();
+      });
     }
+  }
+
+  // Generic incremental executor: runs `work(i)` for i in [0,total) in chunks
+  // via setTimeout(...,0) so the main thread yields between chunks — this is
+  // what keeps the tab responsive (no freeze) even for multi-million-pixel
+  // data. Bails out early if `tabId` is no longer the active tab (user
+  // switched away mid-render), so a slow render for a stale tab never fights
+  // with the one the user is actually looking at.
+  function runChunked(tabId, total, work, onDone){
+    if (total <= 0){ onDone(); return; }
+    let idx = 0;
+    const CHUNK = 50000;
+    function step(){
+      if (tabId !== activeTabId) return;
+      const end = Math.min(idx + CHUNK, total);
+      for (; idx < end; idx++) work(idx);
+      if (idx < total){ setTimeout(step, 0); }
+      else onDone();
+    }
+    setTimeout(step, 0);
   }
 
   async function saveActiveTabData(obj){
@@ -758,22 +790,62 @@ if (typeof exports === 'object' && typeof module === 'object') {
     if (e.target.files && e.target.files[0]) handleFile(e.target.files[0]);
   });
 
+  // JSON.parse is atomic — for a very large exported file (tens/hundreds of
+  // MB of text) it can block the main thread for seconds with no way to
+  // yield. Running it inside a Worker keeps the tab fully responsive while
+  // parsing; if Workers are unavailable for any reason, this transparently
+  // falls back to a normal synchronous parse so import still works.
+  let jsonParseWorkerUrl = null;
+  function parseJsonOffMainThread(text){
+    return new Promise((resolve, reject) => {
+      let worker;
+      try{
+        if (!window.Worker) throw new Error('Worker mavjud emas');
+        if (!jsonParseWorkerUrl){
+          const code = 'self.onmessage=function(e){try{self.postMessage({ok:true,data:JSON.parse(e.data)});}catch(err){self.postMessage({ok:false,error:String(err&&err.message||err)});}};';
+          jsonParseWorkerUrl = URL.createObjectURL(new Blob([code], { type: 'application/javascript' }));
+        }
+        worker = new Worker(jsonParseWorkerUrl);
+      }catch(e){
+        try{ resolve(JSON.parse(text)); } catch(err){ reject(err); }
+        return;
+      }
+      worker.onmessage = (e) => {
+        worker.terminate();
+        if (e.data && e.data.ok) resolve(e.data.data);
+        else reject(new Error((e.data && e.data.error) || 'JSON tahlil qilib bo\'lmadi'));
+      };
+      worker.onerror = () => {
+        worker.terminate();
+        try{ resolve(JSON.parse(text)); } catch(err){ reject(err); }
+      };
+      worker.postMessage(text);
+    });
+  }
+
   function handleFile(file){
     if (busyGuard()) return;
     currentFileName = file.name.replace(/\.[^/.]+$/, '') || 'rasm';
     const isJson = file.type === 'application/json' || file.name.toLowerCase().endsWith('.json');
     if (isJson){
       busy = true;
+      progressWrap.classList.add('show');
+      statusText.textContent = 'Fayl o\'qilmoqda...';
+      progressFill.style.width = '0%';
+      progressCount.textContent = '';
       const reader = new FileReader();
       reader.onload = e => {
-        let payload;
-        try{ payload = JSON.parse(e.target.result); }
-        catch(err){ alert('JSON faylni o\'qib bo\'lmadi: ' + err.message); busy = false; return; }
-        handleJsonImport(payload)
+        statusText.textContent = 'JSON tahlil qilinmoqda...';
+        parseJsonOffMainThread(e.target.result)
+          .then(payload => handleJsonImport(payload))
           .then(() => { busy = false; })
-          .catch(err => { alert('JSON faylni o\'qib bo\'lmadi: ' + err.message); busy = false; });
+          .catch(err => {
+            progressWrap.classList.remove('show');
+            alert('JSON faylni o\'qib bo\'lmadi: ' + (err && err.message ? err.message : String(err)));
+            busy = false;
+          });
       };
-      reader.onerror = () => { alert('Faylni o\'qib bo\'lmadi.'); busy = false; };
+      reader.onerror = () => { progressWrap.classList.remove('show'); alert('Faylni o\'qib bo\'lmadi.'); busy = false; };
       reader.readAsText(file);
       return;
     }
@@ -1207,46 +1279,84 @@ if (typeof exports === 'object' && typeof module === 'object') {
   }
 
   // ---------- JSON (HEX yoki RGB) -> reconstruct -> PNG/JPG/WEBP ----------
-  async function handleJsonImport(payload){
-    if (!payload || !payload.meta || !payload.piksellar) throw new Error('Format mos emas');
-    const { width, height, fileName } = payload.meta;
+  // Returns a Promise (not `async`, since the pixel-fill loop below is spread
+  // across setTimeout chunks) so a multi-million-pixel JSON never blocks the
+  // main thread in one go — the tab stays responsive and the progress bar
+  // keeps moving no matter how large the file is.
+  function handleJsonImport(payload){
+    return new Promise((resolve, reject) => {
+      if (!payload || !payload.meta || !payload.piksellar){ reject(new Error('Format mos emas')); return; }
+      const { width, height, fileName } = payload.meta;
+      if (!(width > 0) || !(height > 0)){ reject(new Error('O\'lcham ma\'lumotlari noto\'g\'ri')); return; }
 
-    resetButtons();
-    collapseDropzone();
-    imgW = width; imgH = height;
-    currentFileName = fileName || currentFileName;
-    canvas.width = width; canvas.height = height;
-    const imageData = ctx.createImageData(width, height);
-    const data = imageData.data;
+      resetButtons();
+      collapseDropzone();
+      imgW = width; imgH = height;
+      currentFileName = fileName || currentFileName;
+      canvas.width = width; canvas.height = height;
+      let imageData;
+      try{ imageData = ctx.createImageData(width, height); }
+      catch(err){ reject(err); return; }
+      const data = imageData.data;
+      const total = width * height;
 
-    for (let r=1; r<=height; r++){
-      const row = payload.piksellar['l'+r];
-      if (!row) throw new Error('l'+r+' qatori topilmadi');
-      for (let c=1; c<=width; c++){
-        const val = row[c];
-        if (val === undefined) throw new Error('l'+r+' qatorida '+c+'-ustun topilmadi');
-        const i = (r-1)*width + (c-1);
-        const off = i*4;
-        if (Array.isArray(val)){
-          data[off] = val[0]; data[off+1] = val[1]; data[off+2] = val[2];
-        } else {
-          const h = String(val).replace('#','');
-          data[off] = parseInt(h.slice(0,2),16);
-          data[off+1] = parseInt(h.slice(2,4),16);
-          data[off+2] = parseInt(h.slice(4,6),16);
-        }
-        data[off+3] = 255;
+      progressWrap.classList.add('show');
+      statusText.textContent = 'Rasm tiklanmoqda...';
+      progressFill.style.width = '0%';
+      progressCount.textContent = '0 / ' + total.toLocaleString('en-US');
+
+      let idx = 0;
+      const CHUNK = 20000;
+      let aborted = false;
+
+      function fail(err){
+        aborted = true;
+        progressWrap.classList.remove('show');
+        reject(err);
       }
-    }
-    ctx.putImageData(imageData, 0, 0);
 
-    metaName.textContent = currentFileName;
-    metaDims.textContent = width + ' × ' + height;
-    metaPixels.textContent = (width*height).toLocaleString('en-US');
-    metaPixelsRow.classList.remove('warn');
-    previewArea.classList.add('show');
-    btnRowJson.style.display = 'flex';
-    await saveActiveTabData({ type: 'json', fileName: currentFileName, width, height, piksellar: payload.piksellar });
+      function step(){
+        if (aborted) return;
+        const end = Math.min(idx + CHUNK, total);
+        for (; idx < end; idx++){
+          const r = Math.floor(idx / width) + 1, c = (idx % width) + 1;
+          const row = payload.piksellar['l' + r];
+          if (!row){ fail(new Error('l' + r + ' qatori topilmadi')); return; }
+          const val = row[c];
+          if (val === undefined){ fail(new Error('l' + r + ' qatorida ' + c + '-ustun topilmadi')); return; }
+          const off = idx * 4;
+          if (Array.isArray(val)){
+            data[off] = val[0]; data[off+1] = val[1]; data[off+2] = val[2];
+          } else {
+            const h = String(val).replace('#', '');
+            data[off] = parseInt(h.slice(0,2),16);
+            data[off+1] = parseInt(h.slice(2,4),16);
+            data[off+2] = parseInt(h.slice(4,6),16);
+          }
+          data[off+3] = 255;
+        }
+        progressFill.style.width = Math.round((idx/total)*100) + '%';
+        progressCount.textContent = idx.toLocaleString('en-US') + ' / ' + total.toLocaleString('en-US');
+        if (idx < total){ setTimeout(step, 0); }
+        else finish();
+      }
+
+      function finish(){
+        ctx.putImageData(imageData, 0, 0);
+        metaName.textContent = currentFileName;
+        metaDims.textContent = width + ' × ' + height;
+        metaPixels.textContent = (width*height).toLocaleString('en-US');
+        metaPixelsRow.classList.remove('warn');
+        previewArea.classList.add('show');
+        btnRowJson.style.display = 'flex';
+        statusText.textContent = 'Tayyor';
+        progressWrap.classList.remove('show');
+        saveActiveTabData({ type: 'json', fileName: currentFileName, width, height, piksellar: payload.piksellar })
+          .then(resolve, reject);
+      }
+
+      setTimeout(step, 0);
+    });
   }
 
   downloadPngBtn.addEventListener('click', () => {
